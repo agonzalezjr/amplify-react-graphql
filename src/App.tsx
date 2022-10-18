@@ -10,6 +10,7 @@ import {
   Text,
   TextField,
   Flex,
+  Image,
 } from "@aws-amplify/ui-react";
 
 import { API } from 'aws-amplify';
@@ -18,6 +19,8 @@ import {
   createNote as createNoteMutation,
   deleteNote as deleteNoteMutation,
 } from "./graphql/mutations";
+
+import { Storage } from 'aws-amplify';
 
 function App({ signOut }: WithAuthenticatorProps) {
   const [notes, setNotes] = useState<Array<any>>([]);
@@ -29,16 +32,36 @@ function App({ signOut }: WithAuthenticatorProps) {
   async function fetchNotes() {
     const apiData: any = await API.graphql({ query: listNotes });
     const notesFromAPI = apiData.data.listNotes.items;
+
+    // Load the storage links manually ...
+    await Promise.all(
+      notesFromAPI.map(async (note: any) => {
+        if (note.image) {
+          const url = await Storage.get(note.name);
+          note.image = url;
+        }
+        return note;
+      })
+    );
+
     setNotes(notesFromAPI);
   }
 
   async function createNote(event: any) {
     event.preventDefault();
     const form = new FormData(event.target);
+    const image: any = form.get("image");
     const data = {
       name: form.get("name"),
       description: form.get("description"),
+      image: image.name
     };
+
+    // Save the image manually ...
+    if (!!data.image) {
+      await Storage.put(data.name as string, image);
+    }
+
     await API.graphql({
       query: createNoteMutation,
       variables: { input: data },
@@ -47,9 +70,13 @@ function App({ signOut }: WithAuthenticatorProps) {
     event.target.reset();
   }
   
-  async function deleteNote({ id }: {id: string}) {
+  async function deleteNote({ id, name }: {id: string; name: string}) {
     const newNotes = notes.filter((note) => note.id !== id);
     setNotes(newNotes);
+
+    // Delete the image manually ...
+    await Storage.remove(name);
+
     await API.graphql({
       query: deleteNoteMutation,
       variables: { input: { id } },
@@ -77,6 +104,12 @@ function App({ signOut }: WithAuthenticatorProps) {
             variation="quiet"
             required
           />
+          <View
+            name="image"
+            as="input"
+            type="file"
+            style={{ alignSelf: "end" }}
+          />
           <Button type="submit" variation="primary">
             Create Note
           </Button>
@@ -95,6 +128,13 @@ function App({ signOut }: WithAuthenticatorProps) {
               {note.name}
             </Text>
             <Text as="span">{note.description}</Text>
+            {note.image && (
+              <Image
+                src={note.image}
+                alt={`visual aid for ${note.name}`}
+                style={{ width: 400 }}
+              />
+            )}
             <Button variation="link" onClick={() => deleteNote(note)}>
               Delete note
             </Button>
